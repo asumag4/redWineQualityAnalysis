@@ -1,0 +1,389 @@
+---
+title: "What Makes Good Red Wine?"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Source
+
+The dataset was initially sourced from kaggle <a link="https://www.kaggle.com/datasets/uciml/red-wine-quality-cortez-et-al-2009/code">Red Wine Quality DataSet</a>
+
+Original data was sourced from the University of Minho, Cortez et. al. (2008) [1].
+
+Let's import the file: 
+```{r}
+wine = read.csv("winequality-red.csv")
+wine
+```
+
+# Model Building && Assessment
+
+For this analysis, we'll attempt to understand the relationship between our independent variables into achieiving a high rating. 
+
+## Libraries Used
+```{r}
+# For dividing the dataset
+library(MASS)
+library(caTools)
+
+# For determining the first-order model 
+library(olsrr)
+
+# For determining the second-order model & plotting graphs
+library(ggplot2)
+library(GGally)
+
+# For testing for Homoscedasticity
+library(lmtest)
+
+# For transforming the data
+library(MASS)
+
+# For plotting interactive graphs 
+library(plotly)
+```
+
+## Splitting the Data
+For us to successfully assess the performance of our model, we will split the data; 80% training data and 20% test data. 
+
+```{r}
+# Split the data: 
+set.seed(123)
+split <- sample.split(wine$quality, SplitRatio = 0.8)
+trainSet <- subset(wine, split == TRUE)
+testSet <-  subset(wine, split == FALSE)
+```
+
+We'll be building our model using $trainSet$ data. 
+
+## Multi-Linear Regression Model 
+
+### First-Order Additive Terms
+
+First we'll use individual t-tests on our independent variables on wine quality 
+```{r}
+# Get the colnames 
+colnames(wine)
+```
+
+$$
+H_0: \beta_0 = \beta_1 = \beta_2 = \text{...} = \beta_n = 0 \\
+H_a: \beta_0 = \beta_1 = \beta_2 = \text{...} = \beta_n \neq 0
+$$
+
+```{r}
+fullWineModel = lm(quality~fixed.acidity+volatile.acidity+citric.acid+residual.sugar+chlorides+free.sulfur.dioxide+total.sulfur.dioxide+density+pH+sulphates+alcohol, data=trainSet)
+summary(fullWineModel)
+```
+
+From individual t-tests; we get that the independent variables; volatile.acidity, chlorides, total.sulfur.dioxide, pH, sulphates, and alcohol have a significant contribution to wine-rating. 
+
+Let's use olsrr library's step-wise function to verify if these independent variables are the most significant determinants to wine-rating. 
+
+```{r}
+wineStepModel = ols_step_both_p(fullWineModel, p_enter=0.05, p_remove=0.6, details=TRUE)
+```
+
+The step-wise method also determines the same six independent variables to be significantly contributing towards wine-quality rating. 
+
+We'll conclude this section by creating the following model: 
+```{r}
+wineModel1 = lm(
+  quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH,
+  data=trainSet
+)
+summary(wineModel1)
+```
+**Interpretation**
+
+This model currently explains 34.69% of the variation found in our dependent variable (quality) with a Residual standard error of 0.6515.
+
+## First-Order Interaction Terms 
+
+```{r}
+wineModelInt = lm(
+    quality ~ (alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH)^2,
+    data=trainSet
+)
+summary(wineModelInt)
+```
+The only interaction terms that whose coefficients were significantly different from 0 (via t-test) are volatile.acidity:total.sulfur.dioxide & sulphates:total.sulfur.dioxide. 
+
+**First Order Terms & Interaction Terms**
+```{r}
+# First Order Full Model 
+wineModel2 = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide),
+    data=trainSet
+)
+summary(wineModel2)
+```
+All the terms are significant, meaning that this is a valid model to continue our analysis with. However, we see that the improvement in the adjusted R-squared value is minimal; 34.69% previously to 37.22% currently, a less than 5% increase. Additionally, there is a minimal decrease in residual standard error; from 0.6515 to 0.6388
+
+### Second Order Terms 
+
+```{r}
+# Import libraries: ggplot2 && GGally 
+# Create a plot to analyze the interaction between the terms 
+ggpairs(
+  trainSet, 
+  lower=list(continuous="smooth_loess", 
+             combo="facethist", 
+             discrete="facetbar", 
+             na="na"))
+```
+From the ggpairs() graph, it appears that sulphates and alcohol have the highest correlation with quality-rating. We can verify with pairs() function to see in closer details, the independent variables we've isolated and how they interact with our dependent variable.
+```{r}
+# Graphing the scatter plot of interaction 
+pairs(~quality + alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH,
+      data=trainSet)
+```
+We can see that sulphates has the most parabolic distribution of data points, followed by alcohol. So let's verify higher-order terms for these two. 
+
+```{r}
+wineModel3_alcohol = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(alcohol^2),
+    data=trainSet
+)
+summary(wineModel3_alcohol)
+```
+That was a bust, let's try sulphates 
+
+```{r}
+wineModel3_sulphates = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(sulphates^2),
+    data=trainSet
+)
+summary(wineModel3_sulphates)
+```
+Sulphates was a hit! So we continue doing this until it is no longer significantly contributing to our model 
+
+```{r}
+wineModel3_sulphates = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(sulphates^2) + I(sulphates^3),
+    data=trainSet
+)
+summary(wineModel3_sulphates)
+```
+
+```{r}
+wineModel3_sulphates = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(sulphates^2) + I(sulphates^3) + I(sulphates^4),
+    data=trainSet
+)
+summary(wineModel3_sulphates)
+```
+So then it ends of to the power of 3 for sulphates, let's now keep our model as such. 
+
+```{r}
+# Final Second Order Term
+wineModel3 = lm(
+    quality ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(sulphates^2) + I(sulphates^3),
+    data=trainSet
+)
+summary(wineModel3)
+```
+Even though $total.sulfur.dioxide$ is no longer "significant" in this model, it must still be included because the independent variable is included in two interaction terms. 
+
+Our final model has come to: 38.13% explanation of the variability of our dependent variable and a residual standard error of 0.6342. Not a drastic improvement from the first-order-additive-model we were looking for, but we're trying our best here. 
+
+## Testing for Assumptions
+
+We'll check for how the data fits within the linearity assumptions. We do this so that if we find evidence of any violations, we will conduct transformations on the data in hopes to achieve a higher adjusted R-squared value.
+
+We'll check for linearity using a residuals vs. fitted plot
+```{r}
+# Checking for linearity
+ggplot(wineModel3, aes(x=.fitted, y=.resid)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0)
+```
+The line has patterns as observed because the y-variable (dependent variable) is a integer, but nonetheless, the data does seem scattered randomly. The overall trend (trend-line) is observed to be adhering closely to 0, with a slight devation at >7 fitted values. This indicates a satisfactory adherance to the linearity assumption. It's not perfect, but it's close enough for the data to be linear. 
+
+$$
+H_0: \text{The data is homoscedastic} \\
+H_a: \text{The data is heteroscedastic}
+$$
+```{r}
+# Testing for homoscedasticity
+# import library: lmtest 
+bptest(wineModel3)
+```
+With a $p-value = 1.934E-7 < \alpha = 0.05$, we reject the null hypothesis and conclude that the residuals of the dependent variable are not homoscedastic. We will have to address this issue. 
+
+$$
+H_0: \text{The data is normally distributed} \\
+H_a: \text{The data is not normally distributed}
+$$
+```{r}
+# Testing for Normality 
+shapiro.test(residuals(wineModel3))
+```
+With a $p-value = 4.373e-08 < \alpha = 0.05$, we reject the null hypothesis and conclude that the residuals of the dependent variable are not normally distributed. We will have to address this issue. 
+
+We have confirmed the violations of equal variance (homoscedasticity) and normal distribution. 
+
+## Transformation
+To fix the violations of linear regression assumptions, let us conduct a transformation on the y-variable. 
+
+```{r}
+# Transforming using boxcox() function 
+# import the MASS library
+bc = boxcox(wineModel3,lambda=seq(-1,1))
+
+# extract the best lambda 
+bestlambda = bc$x[which(bc$y==max(bc$y))]
+bestlambda
+```
+
+Now let's build the model and assess the R squared-adjusted and residual mean square to find any imporvements in the fit of the model to the data after this transformation.
+```{r}
+transformedModel = lm(
+    (((quality^bestlambda)-1)/bestlambda) ~ alcohol + volatile.acidity + sulphates + total.sulfur.dioxide + chlorides + pH +
+      (volatile.acidity*total.sulfur.dioxide) + (sulphates*total.sulfur.dioxide) + 
+      I(sulphates^2) + I(sulphates^3) + I(sulphates^4),
+    data=trainSet
+)
+summary(transformedModel)
+```
+Go figure, the model is actually worse off in this way. 
+
+## Performance
+
+```{r}
+# We'll store the output of the predicted values in a dataframe 
+predictedValues = predict(wineModel3, testSet)
+```
+
+```{r}
+# We'll add a the predicted values to the testSet dataframe
+testSet["predicted_quality"] = predictedValues
+head(testSet)
+```
+
+```{r}
+# We'll plot out the result. 
+ggplot(testSet, aes(x=quality, y=predicted_quality)) +
+  geom_point()
+```
+We can see that for each wine, the quality and predicted quality do range for each other because of the range of the predictor variables, most prevalent for $quality = 5$. Interestingly enough, wines with $quality = 8$, the model is unable to predict them to be 8, limting the predicted quality to ~6.8. This is an indication of the poor performance of this model for it to determine high quality wines. 
+
+Let's find out the % accuracy of our model against the $testSet$, first we'll see the r-squared adjusted (how well the independent variables explain the variation in the dependent variable). 
+
+```{r}
+actual = testSet$quality
+predicted = testSet$predicted_quality
+SST <- sum((actual - mean(actual))^2)
+SSR <- sum((actual - predicted)^2)
+R_squared <- 1 - (SSR / SST)
+R_squared
+```
+It appears that for the testSet, 40.7% of the variation in the independent variable is explainable by the independent variables. 
+
+We'll calculate for the Mean Absolute Percentage Error (MAPE):
+```{r}
+# Calculate MAPE
+MAPE <- mean(abs((actual - predicted) / actual)) * 100
+cat("Mean Absolute Percentage Error (MAPE):", MAPE, "%\n")
+
+```
+The average percentage error is 8.87% between the predicted vs. actual values. 
+
+### Discussion
+
+We find that the model is not "perfect" fitting. This might be due to the fact that our y-variable is an integer, and that the predicted values are floats (decimals). Nonetheless, the average absolute percentage error is 8.87%, which is quite acceptable despite the model only being able to explain 38.13% when fitted to the $trainSet$. 
+
+To answer the question, what makes good red wine? 
+```{r}
+summary(wineModel3)
+```
+Judging from the t-values and p-value for significance; we find that 
+
+1. Alcohol $(% vol)$
+
+2. Volatile Acidity $(g(acetic acid)/dm^3)$
+
+3. Sulphates $(mg/dm^3)$ 
+
+are the top 3 (in descending order) to be the biggest contributors to overall wine quality. 
+
+We find that:
+
+an addition of 1 $(% vol)$ of alchohol increases the quality score by 0.292
+
+a decrease of 1 $(g(acetic acid)/dm^3)$ of volatile acidity increases the quality score by 0.961914
+
+an addition of 1 $(mg/dm^3)$ of volatile acidity increases the quality score by 8.653190  
+
+#### The Sweet Spot... or Bitter Spot (IDK)
+
+For this, let's take all the highest quality wines and find the ranges of each significant factor
+```{r}
+quality8 = wine[wine$quality >= 8, ]
+quality8
+```
+
+**NOTE**: We found out that the highest quality wines were given a rating of 8, and no wines were recorded 9 or 10. 
+
+Let's assess the ranges of quality 8 or higher wines for the most significant factors; being alcohol percentage, volatile acidity and sulphates. 
+
+```{r}
+plot_ly(data = quality8, y = ~alcohol, type = "box", boxpoints = "all") %>%
+  layout(title = "Boxplot of Alcohol (% vol)",
+         yaxis = list(title = "Values"))
+```
+```{r}
+plot_ly(data = quality8, y = ~volatile.acidity, type = "box", boxpoints = "all") %>%
+  layout(title = "Boxplot of Volatile Acidity",
+         yaxis = list(title = "Values"))
+```
+
+```{r}
+plot_ly(data = quality8, y = ~sulphates, type = "box", boxpoints = "all") %>%
+  layout(title = "Boxplot of Sulphates",
+         yaxis = list(title = "Values"))
+```
+
+# Conclusion
+The top 3 (in order) that have the greatest impact on wine tasting are: % of alcohol, volatile acidity, sulphates. 
+
+Wine that have been rated 8 or higher have the following ranges of these factors;
+
+alcohol: 9.8-14%
+
+Alcohol is the concentration of Ethanol in volume of the wine. There is a great variation in this, in contrast average red wine concentration is 12% [2] 
+
+volatile acidity: 0.26-0.85 $(g(acetic acid)/dm^3)$
+
+Volatile acidity is the contribution of vinegar taste in wine, contributions from acetic acid and ethyl acetate [3]. In contrast, a regular level is 0.6 $(g (acetic acid)/L)$ [4].
+
+sulphates: 0.63-1.1 $(mg/dm^3)$ 
+
+Lots of information was found on sulfite $SO_3$ but not on sulphate $SO_4$. 
+
+## Limitations 
+
+The major limitation of this dataset is that the wine rated are limited to 8, and none are rated 9 or 10. This drastically 
+
+# References 
+
+[1] https://www.semanticscholar.org/paper/Modeling-wine-preferences-by-data-mining-from-Cortez-Cerdeira/bf15a0ccc14ac1deb5cea570c870389c16be019c 
+ 
+[2] https://www.niaaa.nih.gov/alcohols-effects-health/what-standard-drink
+
+[3] https://extension.psu.edu/volatile-acidity-in-wine
+
+[4] https://www.awri.com.au/wp-content/uploads/2018/03/s1982.pdf
